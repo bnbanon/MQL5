@@ -8,6 +8,7 @@ from agent.decide import decide
 from agent.memory import TradeMemory
 from agent.price_action import find_setups
 from agent.news import blocking_event
+from agent.record import LONG_RECORD, SetupRecord, adjusted_confidence, key_from_setup, setup_key
 from agent.reflect import reflect_closed_deals
 from agent.risk import lots_for_stop, risk_fraction
 from agent.state import month_return, parse_state
@@ -184,6 +185,95 @@ class DecisionTests(unittest.TestCase):
         order = decide(snap(rsi=85), self.memory, self.account, 0.0)
         self.assertEqual(order["action"], "WAIT")
         self.assertIn("RSI", order["reason"])
+
+
+class SetupRecordTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        seed(self.tmp.name)
+        self.memory = TradeMemory(self.tmp.name)
+        self.record = SetupRecord(self.tmp.name)
+        self.account = {"balance": 10000, "equity": 10000, "free_margin": 9000, "currency": "GBP"}
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_spread_does_not_split_one_setup(self):
+        first = decide(snap(spread_points=12), self.memory, self.account, 0.0)
+        second = decide(snap(spread_points=18), self.memory, self.account, 0.0)
+        self.assertEqual(first["setup_key"], second["setup_key"])
+        self.assertEqual(key_from_setup(first["setup"]), first["setup_key"])
+        self.assertNotEqual(first["setup"], second["setup"])
+
+    def test_short_record_does_not_change_the_lot(self):
+        plain = decide(snap(), self.memory, self.account, 0.0)
+        key = plain["setup_key"]
+        for index in range(9):
+            self.record.note(f"win-{index}", key, True)
+        self.record.note("loss-0", key, False)
+        counted = decide(snap(), self.memory, self.account, 0.0, record=self.record)
+        self.assertEqual(counted["lot_size"], plain["lot_size"])
+        self.assertEqual(counted["confidence"], plain["confidence"])
+        self.assertIn("record 9/10", counted["reason"])
+
+    def test_long_winning_record_nudges_inside_the_band(self):
+        plain = decide(snap(), self.memory, self.account, 0.0)
+        key = plain["setup_key"]
+        for index in range(LONG_RECORD - 3):
+            self.record.note(f"win-{index}", key, True)
+        for index in range(3):
+            self.record.note(f"loss-{index}", key, False)
+        counted = decide(snap(), self.memory, self.account, 0.0, record=self.record)
+        self.assertGreater(counted["lot_size"], plain["lot_size"])
+        self.assertGreater(counted["confidence"], plain["confidence"])
+        fraction = risk_fraction(counted["confidence"])
+        self.assertGreaterEqual(fraction, 0.002)
+        self.assertLessEqual(fraction, 0.01)
+
+    def test_long_losing_record_shrinks_inside_the_band(self):
+        plain = decide(snap(), self.memory, self.account, 0.0)
+        key = plain["setup_key"]
+        for index in range(LONG_RECORD):
+            self.record.note(f"loss-{index}", key, False)
+        counted = decide(snap(), self.memory, self.account, 0.0, record=self.record)
+        self.assertLess(counted["lot_size"], plain["lot_size"])
+        fraction = risk_fraction(counted["confidence"])
+        self.assertGreaterEqual(fraction, 0.002)
+        self.assertLessEqual(fraction, 0.01)
+
+    def test_even_long_record_leaves_size_alone(self):
+        base = 0.62
+        self.assertEqual(adjusted_confidence(base, 15, 15), base)
+        self.assertEqual(adjusted_confidence(base, 14, 15), base)
+
+    def test_same_deal_is_counted_once_and_a_win_is_not_a_ban(self):
+        key = setup_key("EURUSD", "BUY", ["200 EMA and MACD"])
+        text = "BUY EURUSD via 200 EMA and MACD. Price is above the 200 EMA and MACD is above its signal. Spread 20 points."
+        deals = [
+            {"deal": "9", "position": "55", "symbol": "EURUSD", "type": "SELL", "profit": -12.5, "price": 1.1, "entry": "OUT"},
+            {"deal": "9", "position": "55", "symbol": "EURUSD", "type": "SELL", "profit": -12.5, "price": 1.1, "entry": "OUT"},
+            {"deal": "10", "position": "56", "symbol": "EURUSD", "type": "BUY", "profit": 8.0, "price": 1.2, "entry": "OUT"},
+            {"deal": "11", "position": "57", "symbol": "EURUSD", "type": "BUY", "profit": 0.0, "price": 1.2, "entry": "OUT"},
+        ]
+        setups = {
+            "55": {"setup": text.replace("BUY", "SELL"), "key": setup_key("EURUSD", "SELL", ["200 EMA and MACD"])},
+            "56": text,
+            "57": text,
+        }
+        log = []
+        before = self.memory.collection.count()
+        written = reflect_closed_deals(deals, setups, self.memory, self.record, log)
+        self.assertEqual(len(written), 1)
+        self.assertEqual(self.memory.collection.count(), before + 1)
+        self.assertEqual(self.record.stats(setup_key("EURUSD", "SELL", ["200 EMA and MACD"])), (0, 1))
+        self.assertEqual(self.record.stats(key), (1, 0))
+        again = []
+        reflect_closed_deals(deals, {}, self.memory, self.record, again)
+        self.assertEqual(again, [])
+        self.assertEqual(self.memory.collection.count(), before + 1)
+        self.assertEqual(self.record.stats(key), (1, 0))
+        reloaded = SetupRecord(self.tmp.name)
+        self.assertEqual(reloaded.stats(key), (1, 0))
 
 
 class MemoryLoopTests(unittest.TestCase):

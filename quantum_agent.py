@@ -14,6 +14,7 @@ from pathlib import Path
 from agent.decide import MONTHLY_TARGET, decide
 from agent.memory import TradeMemory
 from agent.news import blocking_event
+from agent.record import SetupRecord
 from agent.reflect import reflect_closed_deals
 from agent.state import month_return, parse_state
 from daily_feed import refresh_if_stale
@@ -87,7 +88,7 @@ def command_waiting(files: Path) -> bool:
     return path.exists() and path.stat().st_size > 0
 
 
-def one_pass(memory: TradeMemory, files: Path, track_path: Path) -> None:
+def one_pass(memory: TradeMemory, files: Path, track_path: Path, record: SetupRecord = None) -> None:
     state_path = files / STATE_NAME
     if not state_path.exists():
         print("Waiting for AgentBridge to write", state_path)
@@ -99,9 +100,12 @@ def one_pass(memory: TradeMemory, files: Path, track_path: Path) -> None:
         return
     open_setups = load_open(track_path)
     consume_acks(files, open_setups)
-    lessons = reflect_closed_deals(state["deals"], open_setups, memory)
+    record_log = []
+    lessons = reflect_closed_deals(state["deals"], open_setups, memory, record, record_log)
     for lesson in lessons:
         print("Stored loss:", lesson)
+    for line in record_log:
+        print("Recorded", line)
     held = {row["symbol"] for row in state["positions"]}
     progress = month_return(account, state["deals"])
     print(
@@ -139,6 +143,7 @@ def one_pass(memory: TradeMemory, files: Path, track_path: Path) -> None:
             news_block=news,
             higher=higher,
             bars=chart_bars,
+            record=record,
         )
         print(symbol, order["action"], order.get("reason", ""))
         if order["action"] not in ("BUY", "SELL"):
@@ -147,7 +152,7 @@ def one_pass(memory: TradeMemory, files: Path, track_path: Path) -> None:
             print("Refused an order with no stop")
             continue
         command_id = write_command(files, order)
-        open_setups[command_id] = order["setup"]
+        open_setups[command_id] = {"setup": order["setup"], "key": order["setup_key"]}
         PENDING["symbol"] = order["symbol"]
         PENDING["sent"] = time.time()
         print(
@@ -161,11 +166,12 @@ def one_pass(memory: TradeMemory, files: Path, track_path: Path) -> None:
 def main() -> None:
     seed(MEMORY_PATH)
     memory = TradeMemory(MEMORY_PATH)
+    record = SetupRecord(MEMORY_PATH)
     FILES_DIR.mkdir(parents=True, exist_ok=True)
     track_path = FILES_DIR / TRACK_NAME
     while True:
         try:
-            one_pass(memory, FILES_DIR, track_path)
+            one_pass(memory, FILES_DIR, track_path, record)
         except Exception as error:
             print("Loop error:", error)
         time.sleep(POLL_SECONDS)

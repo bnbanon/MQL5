@@ -1,4 +1,5 @@
 from agent.price_action import find_setups
+from agent.record import setup_key
 from agent.risk import lots_for_stop
 
 MONTHLY_TARGET = 0.10
@@ -97,7 +98,7 @@ def _rsi_blocks(direction: str, rsi: float, names) -> bool:
     return False
 
 
-def decide(snap: dict, memory, account: dict, month_return: float, news_block: str = "", higher=None, bars=None):
+def decide(snap: dict, memory, account: dict, month_return: float, news_block: str = "", higher=None, bars=None, record=None):
     """Return an order dict or a wait dict. Never omits a stop on an order."""
     buys, sells, buy_stops, sell_stops = _candidate_names(snap, bars)
     if buys and sells:
@@ -170,9 +171,14 @@ def decide(snap: dict, memory, account: dict, month_return: float, news_block: s
     if direction == "SELL" and not (sl > snap["ask"]):
         return {"action": "WAIT", "symbol": snap["symbol"], "reason": "stop would be on the wrong side"}
 
+    key = setup_key(snap["symbol"], direction, names)
     gap = abs(snap["macd"] - snap["macd_signal"])
     scale = snap["atr"] if snap["atr"] else 1.0
     confidence = 0.45 + min(0.45, gap / scale)
+    wins, losses = (0, 0)
+    if record is not None:
+        confidence = record.adjust(confidence, key)
+        wins, losses = record.stats(key)
     # A month already at the target does not raise risk. A month behind does not either.
     lots = lots_for_stop(
         balance=account["balance"],
@@ -201,5 +207,14 @@ def decide(snap: dict, memory, account: dict, month_return: float, news_block: s
         "month_return": month_return,
         "month_target": MONTHLY_TARGET,
         "setup": text,
-        "reason": direction + " via " + ", ".join(names),
+        "setup_key": key,
+        "reason": _reason(direction, names, wins, losses),
     }
+
+
+def _reason(direction: str, names, wins: int, losses: int) -> str:
+    text = direction + " via " + ", ".join(names)
+    total = wins + losses
+    if total:
+        return text + f", record {wins}/{total}"
+    return text
