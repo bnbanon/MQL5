@@ -7,6 +7,7 @@ def parse_state(text: str) -> dict:
     symbols = []
     positions = []
     deals = []
+    bars = []
     for raw in text.splitlines():
         line = raw.strip()
         if not line or line.startswith("#"):
@@ -59,6 +60,17 @@ def parse_state(text: str) -> dict:
                     "magic": parts[9],
                 }
             )
+        elif kind == "BAR" and len(parts) >= 7:
+            bars.append(
+                {
+                    "symbol": parts[1],
+                    "timeframe": parts[2],
+                    "open": float(parts[3]),
+                    "high": float(parts[4]),
+                    "low": float(parts[5]),
+                    "close": float(parts[6]),
+                }
+            )
         elif kind == "DEAL" and len(parts) >= 10:
             deals.append(
                 {
@@ -80,6 +92,7 @@ def parse_state(text: str) -> dict:
         "symbols": symbols,
         "positions": positions,
         "deals": deals,
+        "bars": bars,
     }
 
 

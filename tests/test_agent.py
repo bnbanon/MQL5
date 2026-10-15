@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 
 from agent.decide import decide
 from agent.memory import TradeMemory
+from agent.price_action import find_setups
 from agent.news import blocking_event
 from agent.reflect import reflect_closed_deals
 from agent.risk import lots_for_stop, risk_fraction
@@ -137,6 +138,53 @@ class DecisionTests(unittest.TestCase):
         self.assertEqual(order["action"], "WAIT")
         self.assertIn("spread", order["reason"])
 
+    def test_pin_at_support_buys_without_a_macd_cross(self):
+        bars = _pin_at_support()
+        market = snap(bid=1.1028, ask=1.1030, ema200=1.0900, macd=-0.0002, macd_signal=0.0001, rsi=42)
+        order = decide(market, self.memory, self.account, 0.0, bars=bars)
+        self.assertEqual(order["action"], "BUY")
+        self.assertIn("pin bar", order["reason"])
+        self.assertLess(order["stop_loss"], market["bid"])
+
+    def test_pin_below_the_average_is_skipped(self):
+        bars = _pin_at_support()
+        market = snap(bid=1.1028, ask=1.1030, ema200=1.2000, macd=0.0004, macd_signal=0.0001, rsi=42)
+        order = decide(market, self.memory, self.account, 0.0, bars=bars)
+        self.assertEqual(order["action"], "WAIT")
+        self.assertIn("200 EMA", order["reason"])
+
+    def test_buy_and_sell_setups_cancel(self):
+        bars = _bullish_gap_and_bearish_engulfing()
+        names = {row["name"] for row in find_setups(bars, 0.0010, 1.1030, 1.2000)}
+        self.assertIn("fair value gap", names)
+        self.assertIn("engulfing", names)
+        order = decide(
+            snap(bid=1.1030, ask=1.1032, ema200=1.2000, macd=0.0004, macd_signal=0.0001, rsi=48),
+            self.memory,
+            self.account,
+            0.0,
+            bars=bars,
+        )
+        self.assertEqual(order["action"], "WAIT")
+        self.assertIn("both", order["reason"])
+
+    def test_return_into_a_bullish_order_block(self):
+        bars = _return_to_order_block()
+        order = decide(
+            snap(bid=1.1012, ask=1.1014, macd=-0.0002, macd_signal=0.0001, rsi=48),
+            self.memory,
+            self.account,
+            0.0,
+            bars=bars,
+        )
+        self.assertEqual(order["action"], "BUY")
+        self.assertIn("order block", order["reason"])
+
+    def test_stretched_rsi_blocks_a_trend_buy(self):
+        order = decide(snap(rsi=85), self.memory, self.account, 0.0)
+        self.assertEqual(order["action"], "WAIT")
+        self.assertIn("RSI", order["reason"])
+
 
 class MemoryLoopTests(unittest.TestCase):
     def test_loss_is_written_once_and_win_is_not_a_ban(self):
@@ -171,6 +219,7 @@ class MemoryLoopTests(unittest.TestCase):
                 "CHART|PERIOD_M15",
                 "ACCOUNT|10000|10020|9000|GBP|100",
                 "SYMBOL|BTCUSD|PERIOD_M15|100000|100020|0.01|2|0.01|10|0.01|200|150|99000|1|0.5|55|0.01|0.01",
+                "BAR|EURUSD|PERIOD_M15|1.1000|1.1020|1.0990|1.1010",
                 "DEAL|7|3|BTCUSD|SELL|0.01|100000|-5|1700000000|OUT",
             ]
         )
@@ -178,6 +227,45 @@ class MemoryLoopTests(unittest.TestCase):
         self.assertEqual(state["account"]["chart"], "PERIOD_M15")
         self.assertEqual(state["symbols"][0]["symbol"], "BTCUSD")
         self.assertEqual(state["deals"][0]["entry"], "OUT")
+        self.assertEqual(state["bars"][0]["close"], 1.1010)
+
+
+def _bar(open_, high, low, close):
+    return {"open": open_, "high": high, "low": low, "close": close}
+
+
+def _pin_at_support():
+    return [
+        _bar(1.1030, 1.1040, 1.1020, 1.1025),
+        _bar(1.1025, 1.1030, 1.1015, 1.1018),
+        _bar(1.1018, 1.1020, 1.1010, 1.1012),
+        _bar(1.1012, 1.1015, 1.1000, 1.1008),
+        _bar(1.1008, 1.1025, 1.1006, 1.1020),
+        _bar(1.1020, 1.1035, 1.1016, 1.1030),
+        _bar(1.1030, 1.1040, 1.1024, 1.1036),
+        _bar(1.1036, 1.1042, 1.1028, 1.1032),
+        _bar(1.1032, 1.1034, 1.1000, 1.1028),
+    ]
+
+
+def _bullish_gap_and_bearish_engulfing():
+    return [
+        _bar(1.0980, 1.1000, 1.0975, 1.0994),
+        _bar(1.0994, 1.1040, 1.0992, 1.1036),
+        _bar(1.1036, 1.1070, 1.1050, 1.1064),
+        _bar(1.1064, 1.1072, 1.1055, 1.1068),
+        _bar(1.1070, 1.1072, 1.1020, 1.1030),
+    ]
+
+
+def _return_to_order_block():
+    return [
+        _bar(1.1020, 1.1022, 1.0998, 1.1002),
+        _bar(1.1002, 1.1010, 1.1000, 1.1008),
+        _bar(1.1008, 1.1045, 1.1006, 1.1040),
+        _bar(1.1040, 1.1060, 1.1032, 1.1050),
+        _bar(1.1050, 1.1052, 1.1004, 1.1012),
+    ]
 
 
 if __name__ == "__main__":

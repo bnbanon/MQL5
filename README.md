@@ -35,4 +35,4 @@ Set `MT5_FILES` if the terminal data folder is somewhere else.
 
 Once a day, `python3 daily_feed.py` downloads this week's economic calendar plus the Federal Reserve and ECB press feeds into `daily_feed/`. The trading loop refreshes that file itself when it is older than 20 hours. A high-impact release blocks new trades in that currency from 45 minutes before the event until 20 minutes after.
 
-The pattern notes in the brief are written here, not copied from a course. The BabyPips school is listed as the place to study the same ideas: trend, engulfing candles, pin bars, and staying out of news spreads.
+The pattern notes in the brief are written here, not copied from a course. The BabyPips school and the Forexpedia glossary are the study links. The live entries are the 200 EMA with MACD, RSI when it is too stretched to chase, engulfing candles, pin bars, morning and evening stars, inside-bar breaks, support and resistance retests, fair value gaps, and order blocks. A buy idea and a sell idea on the same candle cancel each other. A setup against the 200 EMA needs the higher timeframes to agree.

@@ -5,7 +5,7 @@
 //| to the broker minimum, step, and maximum.                       |
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2026"
-#property version   "1.00"
+#property version   "1.10"
 #property strict
 
 #include <Trade/Trade.mqh>
@@ -272,9 +272,32 @@ void WriteState()
                    entryName);
         }
      }
+   for(int i = 0; i < ArraySize(g_ind); i++)
+      WriteBars(handle, g_ind[i].symbol, g_ind[i].tf);
    FileClose(handle);
    FileDelete("agent_state.csv");
    FileMove("agent_state.tmp", 0, "agent_state.csv", FILE_REWRITE);
+  }
+
+//+------------------------------------------------------------------+
+void WriteBars(const int handle, const string symbol, const ENUM_TIMEFRAMES tf)
+  {
+   MqlRates rates[];
+   ArraySetAsSeries(rates, true);
+   int copied = CopyRates(symbol, tf, 1, 60, rates);
+   if(copied < 15)
+      return;
+   int digits = (int)SymbolInfoInteger(symbol, SYMBOL_DIGITS);
+   string tfName = EnumToString(tf);
+   for(int i = copied - 1; i >= 0; i--)
+     {
+      WriteLine(handle,
+                "BAR|" + symbol + "|" + tfName + "|" +
+                DoubleToString(rates[i].open, digits) + "|" +
+                DoubleToString(rates[i].high, digits) + "|" +
+                DoubleToString(rates[i].low, digits) + "|" +
+                DoubleToString(rates[i].close, digits));
+     }
   }
 
 //+------------------------------------------------------------------+

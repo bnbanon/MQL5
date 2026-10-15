@@ -1,14 +1,18 @@
+from agent.price_action import find_setups
 from agent.risk import lots_for_stop
 
 MONTHLY_TARGET = 0.10
+REVERSAL_NAMES = {"pin bar", "engulfing", "morning star", "evening star", "retest"}
 
 
-def setup_text(snap: dict, direction: str) -> str:
+def setup_text(snap: dict, direction: str, names) -> str:
     ema_side = "above" if snap["bid"] >= snap["ema200"] else "below"
     macd_side = "above" if snap["macd"] >= snap["macd_signal"] else "below"
+    listed = ", ".join(names)
     return (
-        f"{direction} {snap['symbol']} while price is {ema_side} the 200 EMA "
-        f"and MACD is {macd_side} its signal. Spread {int(snap['spread_points'])} points."
+        f"{direction} {snap['symbol']} via {listed}. "
+        f"Price is {ema_side} the 200 EMA and MACD is {macd_side} its signal. "
+        f"Spread {int(snap['spread_points'])} points."
     )
 
 
@@ -20,9 +24,17 @@ def _direction(snap: dict):
     return None
 
 
-def _sl_tp(direction: str, snap: dict):
+def _sl_tp(direction: str, snap: dict, stop_price=None):
     distance = 1.5 * snap["atr"]
-    target = 3.0 * snap["atr"]
+    if stop_price is not None and snap["atr"] > 0:
+        if direction == "BUY":
+            raw = snap["bid"] - stop_price
+        else:
+            raw = stop_price - snap["ask"]
+        if raw > snap["point"] * 5:
+            padded = raw + 0.15 * snap["atr"]
+            distance = min(max(padded, 0.8 * snap["atr"]), 2.5 * snap["atr"])
+    target = max(3.0 * snap["atr"], distance * 2.0)
     if direction == "BUY":
         sl = snap["bid"] - distance
         tp = snap["ask"] + target
@@ -40,11 +52,76 @@ def _higher_blocks(direction: str, higher: list) -> str:
     return ""
 
 
-def decide(snap: dict, memory, account: dict, month_return: float, news_block: str = "", higher=None):
+def _candidate_names(snap: dict, bars):
+    trend = _direction(snap)
+    patterns = find_setups(bars or [], snap["atr"], snap["bid"], snap["ema200"])
+    buys = ["200 EMA and MACD"] if trend == "BUY" else []
+    sells = ["200 EMA and MACD"] if trend == "SELL" else []
+    buy_stops = []
+    sell_stops = []
+    for row in patterns:
+        if row["direction"] == "BUY":
+            buys.append(row["name"])
+            buy_stops.append(row["stop_price"])
+        else:
+            sells.append(row["name"])
+            sell_stops.append(row["stop_price"])
+    return buys, sells, buy_stops, sell_stops
+
+
+def _with_average(direction: str, snap: dict) -> bool:
+    if direction == "BUY":
+        return snap["bid"] > snap["ema200"]
+    return snap["bid"] < snap["ema200"]
+
+
+def _higher_agrees(direction: str, higher) -> bool:
+    agreed = []
+    for other in higher or []:
+        other_direction = _direction(other)
+        if other_direction:
+            agreed.append(other_direction)
+    return bool(agreed) and all(item == direction for item in agreed)
+
+
+def _rsi_blocks(direction: str, rsi: float, names) -> bool:
+    if direction == "BUY" and rsi >= 80:
+        return True
+    if direction == "SELL" and rsi <= 20:
+        return True
+    if set(names) <= REVERSAL_NAMES:
+        if direction == "BUY" and rsi >= 70:
+            return True
+        if direction == "SELL" and rsi <= 30:
+            return True
+    return False
+
+
+def decide(snap: dict, memory, account: dict, month_return: float, news_block: str = "", higher=None, bars=None):
     """Return an order dict or a wait dict. Never omits a stop on an order."""
-    direction = _direction(snap)
-    if direction is None:
-        return {"action": "WAIT", "symbol": snap["symbol"], "reason": "price and MACD do not agree"}
+    buys, sells, buy_stops, sell_stops = _candidate_names(snap, bars)
+    if buys and sells:
+        return {
+            "action": "WAIT",
+            "symbol": snap["symbol"],
+            "reason": "a buy setup and a sell setup are both on this candle",
+        }
+    if not buys and not sells:
+        return {
+            "action": "WAIT",
+            "symbol": snap["symbol"],
+            "reason": "no trend, candle, level, gap, or order block setup",
+        }
+
+    direction = "BUY" if buys else "SELL"
+    names = buys if direction == "BUY" else sells
+    stops = buy_stops if direction == "BUY" else sell_stops
+    if not _with_average(direction, snap) and not _higher_agrees(direction, higher):
+        return {
+            "action": "WAIT",
+            "symbol": snap["symbol"],
+            "reason": "that setup is against the 200 EMA",
+        }
 
     blocked_tf = _higher_blocks(direction, higher)
     if blocked_tf:
@@ -72,7 +149,10 @@ def decide(snap: dict, memory, account: dict, month_return: float, news_block: s
             "reason": "spread is wide relative to ATR",
         }
 
-    text = setup_text(snap, direction)
+    if _rsi_blocks(direction, snap["rsi"], names):
+        return {"action": "WAIT", "symbol": snap["symbol"], "reason": "RSI is too stretched for this setup"}
+
+    text = setup_text(snap, direction, names)
     lesson = memory.blocking_lesson(text)
     if lesson:
         return {
@@ -81,7 +161,10 @@ def decide(snap: dict, memory, account: dict, month_return: float, news_block: s
             "reason": "blocked by a stored loss: " + lesson,
         }
 
-    sl, tp, distance = _sl_tp(direction, snap)
+    stop_price = None
+    if stops:
+        stop_price = min(stops) if direction == "BUY" else max(stops)
+    sl, tp, distance = _sl_tp(direction, snap, stop_price)
     if direction == "BUY" and not (sl < snap["bid"]):
         return {"action": "WAIT", "symbol": snap["symbol"], "reason": "stop would be on the wrong side"}
     if direction == "SELL" and not (sl > snap["ask"]):
@@ -118,5 +201,5 @@ def decide(snap: dict, memory, account: dict, month_return: float, news_block: s
         "month_return": month_return,
         "month_target": MONTHLY_TARGET,
         "setup": text,
-        "reason": text,
+        "reason": direction + " via " + ", ".join(names),
     }

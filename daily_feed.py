@@ -18,14 +18,21 @@ FED_URL = "https://www.federalreserve.gov/feeds/press_all.xml"
 ECB_URL = "https://www.ecb.europa.eu/rss/press.html"
 STUDY_SOURCES = [
     "https://www.babypips.com/learn/forex",
+    "https://www.babypips.com/forexpedia",
     "https://www.federalreserve.gov/feeds/press_all.xml",
     "https://www.ecb.europa.eu/rss/press.html",
 ]
 
 PLAYBOOK = [
-    "Trade in the direction of the 200 EMA. A cross against that average is not an entry.",
-    "An engulfing candle only counts when its body covers the previous body and the higher timeframe agrees.",
-    "A pin bar is a rejection of a level: the wick is the story, and the close has to come back inside the range.",
+    "Trade in the direction of the 200 EMA unless a higher timeframe agrees with the other side.",
+    "MACD has to agree with the 200 EMA for a plain trend entry. RSI above 80 blocks a buy, and RSI below 20 blocks a sell.",
+    "An engulfing candle counts when its body covers the previous body, at a level or with the 200 EMA.",
+    "A pin bar is a long wick at a swing level, and the close has to come back off that wick.",
+    "A morning star or evening star is a push, a small pause, then a push back through the middle of the first candle.",
+    "An inside bar is a candle trapped inside the previous one. The entry is the close that breaks out of that mother candle.",
+    "Support is a swing low and resistance is a swing high. A retest breaks the level and then closes back through it.",
+    "A fair value gap is a three-candle hole that later price has not filled. Enter when price steps back into it.",
+    "An order block is the last opposite candle before that hole. Enter when price steps back into the candle, with the stop beyond it.",
     "Do not open a new trade in the window around a high-impact release for that currency.",
     "A wide spread relative to ATR is a reason to wait, especially on exotics and crypto.",
 ]

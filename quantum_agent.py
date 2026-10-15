@@ -109,13 +109,25 @@ def one_pass(memory: TradeMemory, files: Path, track_path: Path) -> None:
     grouped = {}
     for snap in state["symbols"]:
         grouped.setdefault(snap["symbol"], []).append(snap)
+    bar_groups = {}
+    for bar in state.get("bars", []):
+        bar_groups.setdefault((bar["symbol"], bar["timeframe"]), []).append(bar)
     for symbol, rows in grouped.items():
         if symbol in held:
             continue
         primary = next((row for row in rows if row["timeframe"] == chart), rows[0])
         higher = [row for row in rows if row is not primary]
         news = blocking_event(symbol, [{**row, "when": row.get("time")} for row in events])
-        order = decide(primary, memory, account, progress, news_block=news, higher=higher)
+        chart_bars = bar_groups.get((symbol, primary["timeframe"]), [])
+        order = decide(
+            primary,
+            memory,
+            account,
+            progress,
+            news_block=news,
+            higher=higher,
+            bars=chart_bars,
+        )
         print(symbol, order["action"], order.get("reason", ""))
         if order["action"] not in ("BUY", "SELL"):
             continue

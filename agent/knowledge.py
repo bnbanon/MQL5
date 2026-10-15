@@ -65,4 +65,43 @@ SEED = [
         ),
         "metadata": {"type": "risk_rule", "pair": "ALL"},
     },
+    {
+        "id": "init_008",
+        "document": (
+            "An engulfing candle counts when its body covers the previous body. "
+            "Buy the bullish one at support or with the 200 EMA. Sell the bearish one "
+            "at resistance or with the 200 EMA."
+        ),
+        "metadata": {"type": "price_action", "pair": "ALL"},
+    },
+    {
+        "id": "init_009",
+        "document": (
+            "A pin bar is a long wick and a small body. Buy it when the lower wick "
+            "rejects a swing low and the close comes back up. Sell it when the upper "
+            "wick rejects a swing high."
+        ),
+        "metadata": {"type": "price_action", "pair": "ALL"},
+    },
+    {
+        "id": "init_010",
+        "document": (
+            "Support is a prior swing low and resistance is a prior swing high. "
+            "A retest is a close through that level, then a return that closes back "
+            "the way of the break. A fair value gap is a three-candle hole that has "
+            "not been traded through. An order block is the last opposite candle "
+            "before the push that left that hole. Enter when price comes back into "
+            "the gap or the block, and put the stop beyond it."
+        ),
+        "metadata": {"type": "price_action", "pair": "ALL"},
+    },
+    {
+        "id": "init_011",
+        "document": (
+            "RSI at 80 or higher is too late to buy. RSI at 20 or lower is too late "
+            "to sell. A reversal candle into that extreme is skipped. A setup against "
+            "the 200 EMA needs the higher timeframes to agree, or it is skipped."
+        ),
+        "metadata": {"type": "price_action", "pair": "ALL"},
+    },
 ]
