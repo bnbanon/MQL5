@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+evolutionary_memory/
+agent_open.json
+daily_feed/
