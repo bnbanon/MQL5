@@ -21,7 +21,7 @@ string   g_symbols[];
 
 struct IndSet
   {
-   string            symbol;
+   int               symbolIndex;
    ENUM_TIMEFRAMES   tf;
    int               macd;
    int               atr;
@@ -76,10 +76,11 @@ int SplitList(const string text, const ushort sep, string &items[])
   }
 
 //+------------------------------------------------------------------+
-void AddTimeframe(const string symbol, const ENUM_TIMEFRAMES tf)
+void AddTimeframe(const int symbolIndex, const ENUM_TIMEFRAMES tf)
   {
+   string symbol = g_symbols[symbolIndex];
    for(int i = 0; i < ArraySize(g_ind); i++)
-      if(g_ind[i].symbol == symbol && g_ind[i].tf == tf)
+      if(g_ind[i].symbolIndex == symbolIndex && g_ind[i].tf == tf)
          return;
    int macd = iMACD(symbol, tf, 12, 26, 9, PRICE_CLOSE);
    int atr = iATR(symbol, tf, 14);
@@ -95,7 +96,7 @@ void AddTimeframe(const string symbol, const ENUM_TIMEFRAMES tf)
      }
    int n = ArraySize(g_ind);
    ArrayResize(g_ind, n + 1);
-   g_ind[n].symbol = symbol;
+   g_ind[n].symbolIndex = symbolIndex;
    g_ind[n].tf = tf;
    g_ind[n].macd = macd;
    g_ind[n].atr = atr;
@@ -111,11 +112,15 @@ int OnInit()
       return(INIT_FAILED);
    for(int i = 0; i < ArraySize(g_symbols); i++)
      {
-      SymbolSelect(g_symbols[i], true);
-      AddTimeframe(g_symbols[i], PERIOD_M15);
-      AddTimeframe(g_symbols[i], PERIOD_H1);
-      AddTimeframe(g_symbols[i], PERIOD_H4);
-      AddTimeframe(g_symbols[i], _Period);
+      if(!SymbolInfoInteger(g_symbols[i], SYMBOL_EXIST) || !SymbolSelect(g_symbols[i], true))
+        {
+         Print("Skipped ", g_symbols[i], ". It is not on this broker. Error ", GetLastError());
+         continue;
+        }
+      AddTimeframe(i, PERIOD_M15);
+      AddTimeframe(i, PERIOD_H1);
+      AddTimeframe(i, PERIOD_H4);
+      AddTimeframe(i, _Period);
      }
    if(ArraySize(g_ind) < 1)
       return(INIT_FAILED);
@@ -144,6 +149,8 @@ void OnDeinit(const int reason)
 //+------------------------------------------------------------------+
 bool OneValue(const int handle, const int buffer, double &value)
   {
+   if(handle == INVALID_HANDLE || BarsCalculated(handle) <= 1)
+      return(false);
    double data[];
    ArraySetAsSeries(data, true);
    if(CopyBuffer(handle, buffer, 1, 1, data) != 1)
@@ -193,7 +200,7 @@ void WriteState()
 
    for(int i = 0; i < ArraySize(g_ind); i++)
      {
-      string symbol = g_ind[i].symbol;
+      string symbol = g_symbols[g_ind[i].symbolIndex];
       double bid = SymbolInfoDouble(symbol, SYMBOL_BID);
       double ask = SymbolInfoDouble(symbol, SYMBOL_ASK);
       double point = SymbolInfoDouble(symbol, SYMBOL_POINT);
@@ -273,7 +280,7 @@ void WriteState()
         }
      }
    for(int i = 0; i < ArraySize(g_ind); i++)
-      WriteBars(handle, g_ind[i].symbol, g_ind[i].tf);
+      WriteBars(handle, g_symbols[g_ind[i].symbolIndex], g_ind[i].tf);
    FileClose(handle);
    FileDelete("agent_state.csv");
    FileMove("agent_state.tmp", 0, "agent_state.csv", FILE_REWRITE);
@@ -282,21 +289,24 @@ void WriteState()
 //+------------------------------------------------------------------+
 void WriteBars(const int handle, const string symbol, const ENUM_TIMEFRAMES tf)
   {
-   MqlRates rates[];
-   ArraySetAsSeries(rates, true);
-   int copied = CopyRates(symbol, tf, 1, 60, rates);
-   if(copied < 15)
+   if(Bars(symbol, tf) < 61)
       return;
    int digits = (int)SymbolInfoInteger(symbol, SYMBOL_DIGITS);
    string tfName = EnumToString(tf);
-   for(int i = copied - 1; i >= 0; i--)
+   for(int shift = 60; shift >= 1; shift--)
      {
+      double open = iOpen(symbol, tf, shift);
+      double high = iHigh(symbol, tf, shift);
+      double low = iLow(symbol, tf, shift);
+      double close = iClose(symbol, tf, shift);
+      if(open <= 0.0 || high <= 0.0 || low <= 0.0 || close <= 0.0)
+         return;
       WriteLine(handle,
                 "BAR|" + symbol + "|" + tfName + "|" +
-                DoubleToString(rates[i].open, digits) + "|" +
-                DoubleToString(rates[i].high, digits) + "|" +
-                DoubleToString(rates[i].low, digits) + "|" +
-                DoubleToString(rates[i].close, digits));
+                DoubleToString(open, digits) + "|" +
+                DoubleToString(high, digits) + "|" +
+                DoubleToString(low, digits) + "|" +
+                DoubleToString(close, digits));
      }
   }
 
@@ -427,9 +437,17 @@ void ReadCommand()
   {
    if(!FileIsExist("agent_cmd.txt"))
       return;
-   int handle = FileOpen("agent_cmd.txt", FILE_READ | FILE_TXT | FILE_ANSI | FILE_SHARE_READ);
+   int handle = FileOpen("agent_cmd.txt", FILE_READ | FILE_TXT | FILE_ANSI | FILE_SHARE_READ | FILE_SHARE_WRITE);
    if(handle == INVALID_HANDLE)
+     {
+      static datetime complained = 0;
+      if(TimeCurrent() - complained > 30)
+        {
+         Print("Could not read agent_cmd.txt. Error ", GetLastError());
+         complained = TimeCurrent();
+        }
       return;
+     }
    string line = FileReadString(handle);
    FileClose(handle);
    FileDelete("agent_cmd.txt");
@@ -440,8 +458,8 @@ void ReadCommand()
 //+------------------------------------------------------------------+
 void OnTimer()
   {
-   WriteState();
    ReadCommand();
+   WriteState();
   }
 
 //+------------------------------------------------------------------+

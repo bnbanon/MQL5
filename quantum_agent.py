@@ -31,6 +31,7 @@ STATE_NAME = "agent_state.csv"
 COMMAND_NAME = "agent_cmd.txt"
 TRACK_NAME = "agent_open.json"
 POLL_SECONDS = float(os.environ.get("AGENT_POLL", "5"))
+PENDING = {"symbol": "", "sent": 0.0}
 
 
 def load_open(path: Path) -> dict:
@@ -81,6 +82,11 @@ def consume_acks(files: Path, open_setups: dict) -> None:
             open_setups.pop(command_id, None)
 
 
+def command_waiting(files: Path) -> bool:
+    path = files / COMMAND_NAME
+    return path.exists() and path.stat().st_size > 0
+
+
 def one_pass(memory: TradeMemory, files: Path, track_path: Path) -> None:
     state_path = files / STATE_NAME
     if not state_path.exists():
@@ -106,6 +112,12 @@ def one_pass(memory: TradeMemory, files: Path, track_path: Path) -> None:
     brief = refresh_if_stale(FEED_DIR)
     events = brief.get("events", [])
     print(f"Daily brief {brief.get('fetched_at', '')}  events {len(events)}")
+    if PENDING["symbol"] and PENDING["symbol"] in held:
+        PENDING["symbol"] = ""
+    if command_waiting(files) or (PENDING["symbol"] and time.time() - PENDING["sent"] < 20):
+        print("Waiting for the bridge to finish the last order", PENDING["symbol"])
+        save_open(track_path, open_setups)
+        return
     grouped = {}
     for snap in state["symbols"]:
         grouped.setdefault(snap["symbol"], []).append(snap)
@@ -136,6 +148,8 @@ def one_pass(memory: TradeMemory, files: Path, track_path: Path) -> None:
             continue
         command_id = write_command(files, order)
         open_setups[command_id] = order["setup"]
+        PENDING["symbol"] = order["symbol"]
+        PENDING["sent"] = time.time()
         print(
             f"Sent {order['action']} {order['symbol']} {order['lot_size']} "
             f"sl {order['stop_loss']} tp {order['take_profit']} id {command_id}"
