@@ -30,3 +30,9 @@ python3 quantum_agent.py
 The bridge writes `MQL5/Files/agent_state.csv`. The agent writes `agent_cmd.txt` in that same folder. A stop-out is stored under its deal id, so the same loss is not recorded twice.
 
 Set `MT5_FILES` if the terminal data folder is somewhere else.
+
+## Daily data
+
+Once a day, `python3 daily_feed.py` downloads this week's economic calendar plus the Federal Reserve and ECB press feeds into `daily_feed/`. The trading loop refreshes that file itself when it is older than 20 hours. A high-impact release blocks new trades in that currency from 45 minutes before the event until 20 minutes after.
+
+The pattern notes in the brief are written here, not copied from a course. The BabyPips school is listed as the place to study the same ideas: trend, engulfing candles, pin bars, and staying out of news spreads.

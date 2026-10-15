@@ -13,11 +13,14 @@ from pathlib import Path
 
 from agent.decide import MONTHLY_TARGET, decide
 from agent.memory import TradeMemory
+from agent.news import blocking_event
 from agent.reflect import reflect_closed_deals
 from agent.state import month_return, parse_state
+from daily_feed import refresh_if_stale
 from seed_engine import seed
 
 MEMORY_PATH = os.environ.get("AGENT_MEMORY", "./evolutionary_memory")
+FEED_DIR = os.environ.get("DAILY_FEED", "./daily_feed")
 FILES_DIR = Path(
     os.environ.get(
         "MT5_FILES",
@@ -100,6 +103,9 @@ def one_pass(memory: TradeMemory, files: Path, track_path: Path) -> None:
         f"month {progress * 100:.2f}%  target {MONTHLY_TARGET * 100:.0f}%"
     )
     chart = account.get("chart", "")
+    brief = refresh_if_stale(FEED_DIR)
+    events = brief.get("events", [])
+    print(f"Daily brief {brief.get('fetched_at', '')}  events {len(events)}")
     grouped = {}
     for snap in state["symbols"]:
         grouped.setdefault(snap["symbol"], []).append(snap)
@@ -108,7 +114,8 @@ def one_pass(memory: TradeMemory, files: Path, track_path: Path) -> None:
             continue
         primary = next((row for row in rows if row["timeframe"] == chart), rows[0])
         higher = [row for row in rows if row is not primary]
-        order = decide(primary, memory, account, progress, higher=higher)
+        news = blocking_event(symbol, [{**row, "when": row.get("time")} for row in events])
+        order = decide(primary, memory, account, progress, news_block=news, higher=higher)
         print(symbol, order["action"], order.get("reason", ""))
         if order["action"] not in ("BUY", "SELL"):
             continue

@@ -2,8 +2,11 @@ import os
 import tempfile
 import unittest
 
+from datetime import datetime, timedelta, timezone
+
 from agent.decide import decide
 from agent.memory import TradeMemory
+from agent.news import blocking_event
 from agent.reflect import reflect_closed_deals
 from agent.risk import lots_for_stop, risk_fraction
 from agent.state import month_return, parse_state
@@ -110,6 +113,24 @@ class DecisionTests(unittest.TestCase):
         higher = snap(timeframe="PERIOD_H4", bid=1.0800, ask=1.0802, ema200=1.0900, macd=-0.0004, macd_signal=-0.0001)
         order = decide(snap(), self.memory, self.account, 0.0, higher=[higher])
         self.assertEqual(order["action"], "WAIT")
+
+    def test_high_impact_news_blocks_that_currency(self):
+        when = datetime.now(timezone.utc) + timedelta(minutes=20)
+        events = [
+            {
+                "currency": "USD",
+                "title": "CPI m/m",
+                "impact": "High",
+                "time": when.isoformat(),
+                "when": when,
+            }
+        ]
+        reason = blocking_event("EURUSD", events, now=datetime.now(timezone.utc))
+        self.assertIn("CPI", reason)
+        order = decide(snap(), self.memory, self.account, 0.0, news_block=reason)
+        self.assertEqual(order["action"], "WAIT")
+        self.assertIn("CPI", order["reason"])
+        self.assertEqual(blocking_event("EURGBP", events, now=datetime.now(timezone.utc)), "")
 
     def test_wide_spread_waits(self):
         order = decide(snap(spread_points=5000, point=0.01, atr=1.0), self.memory, self.account, 0.0)
